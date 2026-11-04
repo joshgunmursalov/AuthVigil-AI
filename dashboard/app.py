@@ -414,3 +414,94 @@ if not priority_alerts.empty:
         "Investigation records are temporary. "
         "Export the CSV to preserve your work."
     )
+
+
+# SentinelAI SOC - Automated Detection Rules
+
+st.divider()
+st.subheader("Automated Detection Rules")
+
+if not priority_alerts.empty:
+
+    def numeric_feature(name):
+        value = pd.to_numeric(
+            incident.get(name, 0),
+            errors="coerce"
+        )
+        return float(value) if pd.notna(value) else 0.0
+
+    failed = numeric_feature("failed_logins")
+    failure_rate = numeric_feature("failure_rate")
+    unique_users = numeric_feature("unique_usernames")
+    rdp = numeric_feature("rdp_logon_count")
+    off_hours = numeric_feature("off_hours_count")
+
+    detected_rules = []
+
+    # Rule 1: Excessive failed logins
+    if failed >= 10 and failure_rate >= 0.70:
+        detected_rules.append({
+            "rule": "Excessive Failed Logins",
+            "reason": (
+                f"{int(failed)} failed logins; "
+                f"failure rate {failure_rate:.1%}"
+            ),
+            "recommendation":
+                "Review authentication failures and "
+                "their source, timing, and affected accounts."
+        })
+
+    # Rule 2: Possible password spraying
+    if unique_users >= 5 and failed >= 5:
+        detected_rules.append({
+            "rule": "Possible Password Spraying",
+            "reason": (
+                f"{int(unique_users)} unique usernames "
+                f"and {int(failed)} failed logins"
+            ),
+            "recommendation":
+                "Correlate failed logins across accounts "
+                "and verify whether attempts share a source."
+        })
+
+    # Rule 3: Off-hours remote access
+    if rdp >= 1 and off_hours >= 1:
+        detected_rules.append({
+            "rule": "Off-Hours Remote Access",
+            "reason": (
+                f"{int(rdp)} RDP logons and "
+                f"{int(off_hours)} off-hours events"
+            ),
+            "recommendation":
+                "Verify authorized remote access, "
+                "user identity, and session timing."
+        })
+
+    if detected_rules:
+
+        st.metric(
+            "Matched Detection Rules",
+            len(detected_rules)
+        )
+
+        for item in detected_rules:
+            with st.expander(
+                item["rule"],
+                expanded=True
+            ):
+                st.write("Evidence:", item["reason"])
+                st.write(
+                    "Investigation guidance:",
+                    item["recommendation"]
+                )
+
+    else:
+        st.info(
+            "No illustrative detection rules matched. "
+            "The ML alert still requires investigation."
+        )
+
+    st.caption(
+        "Rules are experimental heuristics, "
+        "not confirmed incident classifications."
+    )
