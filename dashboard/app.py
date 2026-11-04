@@ -42,36 +42,148 @@ df["window_start_utc"] = pd.to_datetime(
     errors="coerce"
 )
 
-alerts = df[df["prediction"] == 1].copy()
+# SentinelAI SOC - Advanced SOC Filtering
+
+df["prediction"] = pd.to_numeric(
+    df["prediction"], errors="coerce"
+)
+
+df["risk_score"] = pd.to_numeric(
+    df["risk_score"], errors="coerce"
+)
+
+st.sidebar.header("SOC Investigation Filters")
+
+# 1. Source IP Filter
+ip_options = sorted(
+    df["source_ip"].dropna().astype(str).unique()
+)
+
+selected_ips = st.sidebar.multiselect(
+    "Select Source IPs",
+    options=ip_options
+)
+
+# 2. Alert Status Filter
+selected_status = st.sidebar.selectbox(
+    "Alert Status",
+    ["All", "Suspicious", "Normal"]
+)
+
+# 3. Date Range Filter
+valid_dates = df["window_start_utc"].dropna()
+
+if valid_dates.empty:
+    st.error("No valid timestamps found.")
+    st.stop()
+
+min_date = valid_dates.min().date()
+max_date = valid_dates.max().date()
+
+date_range = st.sidebar.date_input(
+    "Date Range (UTC)",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+# 4. Apply Filters
+filtered = df.copy()
+
+if selected_ips:
+    filtered = filtered[
+        filtered["source_ip"].isin(selected_ips)
+    ]
+
+if selected_status == "Suspicious":
+    filtered = filtered[
+        filtered["prediction"] == 1
+    ]
+
+elif selected_status == "Normal":
+    filtered = filtered[
+        filtered["prediction"] == 0
+    ]
+
+if len(date_range) == 2:
+    start_date, end_date = date_range
+
+    filtered = filtered[
+        filtered["window_start_utc"].dt.date.between(
+            start_date, end_date
+        )
+    ]
+
+# 5. SOC Metrics
+alerts = filtered[
+    filtered["prediction"] == 1
+].copy()
+
+st.subheader("SOC Detection Overview")
 
 col1, col2, col3 = st.columns(3)
 
-col1.metric("Analyzed Windows", len(df))
-col2.metric("Suspicious Windows", len(alerts))
-col3.metric("Normal Windows", len(df) - len(alerts))
+col1.metric(
+    "Analyzed Windows",
+    len(filtered)
+)
+
+col2.metric(
+    "Suspicious Windows",
+    len(alerts)
+)
+
+col3.metric(
+    "Normal Windows",
+    int((filtered["prediction"] == 0).sum())
+)
 
 st.divider()
 
+# 6. Top Suspicious IPs
 st.subheader("Top Suspicious Source IPs")
-top_ips = alerts["source_ip"].value_counts().head(10)
-st.bar_chart(top_ips)
 
+if not alerts.empty:
+    top_ips = (
+        alerts["source_ip"]
+        .value_counts()
+        .head(10)
+    )
+
+    st.bar_chart(top_ips)
+else:
+    st.info("No suspicious IPs for these filters.")
+
+# 7. Detection Timeline
 st.subheader("Detection Timeline")
-timeline = (
-    alerts.dropna(subset=["window_start_utc"])
-    .set_index("window_start_utc")
-    .resample("1D")
-    .size()
-)
-st.line_chart(timeline)
 
+if not alerts.empty:
+    timeline = (
+        alerts.dropna(subset=["window_start_utc"])
+        .set_index("window_start_utc")
+        .resample("1D")
+        .size()
+    )
+
+    st.line_chart(timeline)
+else:
+    st.info("No alerts in selected date range.")
+
+# 8. SOC Alert Table
 st.subheader("SOC Security Alerts")
+
 st.dataframe(
-    alerts.sort_values("risk_score", ascending=False),
-    use_container_width=True
+    alerts.sort_values(
+        "risk_score",
+        ascending=False
+    ),
+    use_container_width=True,
+    hide_index=True
 )
 
 st.caption(
-    "Predictions are experimental. Risk scores "
-    "are not calibrated attack probabilities."
+    "Synthetic dataset | Experimental predictions | "
+    "Risk scores are not calibrated probabilities."
 )
+
+
