@@ -16,16 +16,171 @@ st.caption(
     "Random Forest detection results"
 )
 
-uploaded_file = st.file_uploader(
-    "Upload soc_predictions.csv",
-    type=["csv"]
+
+# SentinelAI SOC - AI Prediction Integration
+
+from pathlib import Path
+import joblib
+import numpy as np
+
+@st.cache_resource
+def load_rf_assets():
+    model_dir = Path(__file__).resolve().parent
+
+    model = joblib.load(
+        model_dir / "random_forest.joblib"
+    )
+    config = joblib.load(
+        model_dir / "model_config.joblib"
+    )
+
+    features = list(config["feature_columns"])
+
+    if len(features) != model.n_features_in_:
+        raise ValueError("Model feature count mismatch.")
+
+    if hasattr(model, "feature_names_in_"):
+        if list(model.feature_names_in_) != features:
+            raise ValueError("Model feature order mismatch.")
+
+    return model, features
+
+
+data_mode = st.radio(
+    "Data Source",
+    [
+        "Existing Predictions",
+        "New Feature CSV - Run AI"
+    ],
+    horizontal=True
 )
 
-if uploaded_file is None:
-    st.info("Upload the prediction CSV to start.")
-    st.stop()
+if data_mode == "Existing Predictions":
 
-df = pd.read_csv(uploaded_file)
+    uploaded_file = st.file_uploader(
+        "Upload soc_predictions.csv",
+        type=["csv"],
+        key="predictions_upload"
+    )
+
+    if uploaded_file is None:
+        st.info("Upload the prediction CSV to start.")
+        st.stop()
+
+    df = pd.read_csv(uploaded_file)
+
+else:
+
+    new_file = st.file_uploader(
+        "Upload 15-minute Feature CSV",
+        type=["csv"],
+        key="features_upload"
+    )
+
+    if new_file is None:
+        st.info("Upload a feature CSV for AI analysis.")
+        st.stop()
+
+    try:
+        model, feature_columns = load_rf_assets()
+    except Exception as error:
+        st.error(f"Model loading failed: {error}")
+        st.stop()
+
+    raw_df = pd.read_csv(new_file)
+
+    if raw_df.empty:
+        st.error("The uploaded CSV is empty.")
+        st.stop()
+
+    # Use test records for the original labeled dataset.
+    if (
+        "split" in raw_df.columns
+        and raw_df["split"].eq("test").any()
+    ):
+        test_only = st.checkbox(
+            "Use only test windows",
+            value=True
+        )
+
+        if test_only:
+            raw_df = raw_df[
+                raw_df["split"] == "test"
+            ].copy()
+
+    required_columns = [
+        "window_start_utc",
+        "source_ip"
+    ] + feature_columns
+
+    missing = [
+        col for col in required_columns
+        if col not in raw_df.columns
+    ]
+
+    if missing:
+        st.error(f"Missing features: {missing}")
+        st.stop()
+
+    features_df = raw_df[
+        feature_columns
+    ].apply(pd.to_numeric, errors="coerce")
+
+    if not np.isfinite(
+        features_df.to_numpy(dtype=float)
+    ).all():
+        st.error(
+            "Feature columns contain missing "
+            "or invalid numeric values."
+        )
+        st.stop()
+
+    # Prevent test labels from being used as inputs.
+    df = raw_df.drop(
+        columns=["is_attack", "scenario", "split"],
+        errors="ignore"
+    ).copy()
+
+    # Actual Random Forest inference
+    df["prediction"] = model.predict(
+        features_df
+    ).astype(int)
+
+    attack_class_index = list(
+        model.classes_
+    ).index(1)
+
+    df["risk_score"] = model.predict_proba(
+        features_df
+    )[:, attack_class_index]
+
+    df["alert_status"] = np.where(
+        df["prediction"] == 1,
+        "Suspicious",
+        "Normal"
+    )
+
+    st.success(
+        f"AI analysis completed: {len(df)} windows."
+    )
+
+    st.metric(
+        "AI Detected Suspicious Windows",
+        int(df["prediction"].sum())
+    )
+
+    st.download_button(
+        "Download AI Predictions",
+        data=df.to_csv(index=False),
+        file_name="sentinelai_ai_predictions.csv",
+        mime="text/csv"
+    )
+
+    st.caption(
+        "Random Forest scores are not "
+        "calibrated incident probabilities."
+    )
+
 
 required = [
     "window_start_utc", "source_ip",
