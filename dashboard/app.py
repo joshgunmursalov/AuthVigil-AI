@@ -829,3 +829,134 @@ else:
         "Ground-truth labels are required for "
         "precision, recall and F1 evaluation."
     )
+
+
+# SentinelAI SOC - Model Performance Comparison
+
+from pathlib import Path
+
+st.divider()
+st.subheader("Model Performance Comparison")
+
+performance_path = (
+    Path(__file__).resolve().parent
+    / "sentinelai_model_performance.csv"
+)
+
+if performance_path.exists():
+
+    perf = pd.read_csv(performance_path)
+
+    st.caption(
+        "Evaluation: 2,001 synthetic test windows. "
+        "Results are fixed and independent of "
+        "dashboard filters."
+    )
+
+    # Performance comparison table
+    st.markdown("### Detection Performance Metrics")
+
+    metric_cols = [
+        "Precision", "Recall", "F1_score",
+        "FPR", "Accuracy"
+    ]
+
+    display_perf = perf.copy()
+    display_perf[metric_cols] = (
+        display_perf[metric_cols] * 100
+    ).round(2)
+
+    st.dataframe(
+        display_perf[
+            ["Model"] + metric_cols
+        ],
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # Model comparison chart
+    st.markdown("### Model Comparison Chart")
+
+    chart_data = (
+        perf.set_index("Model")[
+            ["Precision", "Recall", "F1_score"]
+        ] * 100
+    )
+
+    st.bar_chart(chart_data)
+
+    # Individual model investigation
+    st.markdown("### Individual Model Evaluation")
+
+    selected_model = st.selectbox(
+        "Select a model",
+        perf["Model"].tolist(),
+        key="performance_model"
+    )
+
+    model_row = perf[
+        perf["Model"] == selected_model
+    ].iloc[0]
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric(
+        "Precision",
+        f"{model_row['Precision']:.2%}"
+    )
+    c2.metric(
+        "Recall",
+        f"{model_row['Recall']:.2%}"
+    )
+    c3.metric(
+        "F1-score",
+        f"{model_row['F1_score']:.2%}"
+    )
+    c4.metric(
+        "False Positive Rate",
+        f"{model_row['FPR']:.2%}"
+    )
+
+    # Confusion Matrix
+    st.markdown("### Confusion Matrix")
+
+    cm = pd.DataFrame(
+        [
+            [int(model_row["TN"]),
+             int(model_row["FP"])],
+            [int(model_row["FN"]),
+             int(model_row["TP"])]
+        ],
+        index=["Actual Normal", "Actual Attack"],
+        columns=[
+            "Predicted Normal",
+            "Predicted Attack"
+        ]
+    )
+
+    st.dataframe(cm, use_container_width=True)
+
+    # Error statistics
+    st.markdown("### Detection Error Summary")
+
+    c1, c2 = st.columns(2)
+
+    c1.metric(
+        "Missed Attacks",
+        int(model_row["FN"])
+    )
+
+    c2.metric(
+        "False Alerts",
+        int(model_row["FP"])
+    )
+
+    st.warning(
+        "Evaluation uses synthetic data. "
+        "Hybrid rules were developed after "
+        "examining test results, so their "
+        "comparison is exploratory."
+    )
+
+else:
+    st.error("Model performance CSV not found.")
