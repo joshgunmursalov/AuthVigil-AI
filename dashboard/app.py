@@ -630,3 +630,202 @@ if not priority_alerts.empty:
 
 else:
     st.info("No suspicious alerts to analyze.")
+
+
+# SentinelAI SOC - Hybrid Detection Engine
+
+st.divider()
+st.subheader("Hybrid Detection Engine")
+
+# Hazirda secilmis filterlere esasen butun
+# ML normal ve suspicious pencerelerini yoxlayiriq
+hybrid_df = filtered.copy()
+
+required_features = [
+    "prediction",
+    "failed_logins",
+    "failure_rate",
+    "unique_usernames",
+    "rdp_logon_count",
+    "off_hours_count"
+]
+
+missing_features = [
+    col for col in required_features
+    if col not in hybrid_df.columns
+]
+
+if missing_features:
+    st.error(
+        f"Missing columns: {missing_features}"
+    )
+
+elif hybrid_df.empty:
+    st.info("No windows match the current filters.")
+
+else:
+    for col in required_features:
+        hybrid_df[col] = pd.to_numeric(
+            hybrid_df[col], errors="coerce"
+        )
+
+    # Machine Learning Detection
+    hybrid_df["ml_alert"] = (
+        hybrid_df["prediction"] == 1
+    )
+
+    # Rule-Based Detection
+    hybrid_df["rule_excessive_failures"] = (
+        (hybrid_df["failed_logins"] >= 10) &
+        (hybrid_df["failure_rate"] >= 0.70)
+    )
+
+    hybrid_df["rule_password_spraying"] = (
+        (hybrid_df["unique_usernames"] >= 5) &
+        (hybrid_df["failed_logins"] >= 5)
+    )
+
+    hybrid_df["rule_off_hours_remote"] = (
+        (hybrid_df["rdp_logon_count"] >= 1) &
+        (hybrid_df["off_hours_count"] >= 1)
+    )
+
+    rule_cols = [
+        "rule_excessive_failures",
+        "rule_password_spraying",
+        "rule_off_hours_remote"
+    ]
+
+    hybrid_df["rule_alert"] = (
+        hybrid_df[rule_cols].any(axis=1)
+    )
+
+    # Hybrid OR: ML OR Rules
+    hybrid_df["hybrid_or"] = (
+        hybrid_df["ml_alert"] |
+        hybrid_df["rule_alert"]
+    )
+
+    # Hybrid AND: ML AND Rules
+    hybrid_df["hybrid_and"] = (
+        hybrid_df["ml_alert"] &
+        hybrid_df["rule_alert"]
+    )
+
+    # Detection Statistics
+    ml_count = int(hybrid_df["ml_alert"].sum())
+    rule_count = int(hybrid_df["rule_alert"].sum())
+    or_count = int(hybrid_df["hybrid_or"].sum())
+    and_count = int(hybrid_df["hybrid_and"].sum())
+
+    st.subheader("Detection Mode Comparison")
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    c1.metric("ML Only", ml_count)
+    c2.metric("Rules Only", rule_count)
+    c3.metric("Hybrid OR", or_count)
+    c4.metric("Hybrid AND", and_count)
+
+    # Detection comparison chart
+    comparison_df = pd.DataFrame({
+        "Mode": [
+            "ML Only",
+            "Rules Only",
+            "Hybrid OR",
+            "Hybrid AND"
+        ],
+        "Alert Count": [
+            ml_count,
+            rule_count,
+            or_count,
+            and_count
+        ]
+    })
+
+    st.bar_chart(
+        comparison_df.set_index("Mode")
+    )
+
+    # Overlap Analysis
+    st.subheader("ML and Rule Agreement")
+
+    ml = hybrid_df["ml_alert"]
+    rule = hybrid_df["rule_alert"]
+
+    agreement = pd.DataFrame({
+        "Rule matched": [
+            int((ml & rule).sum()),
+            int((~ml & rule).sum())
+        ],
+        "No rule matched": [
+            int((ml & ~rule).sum()),
+            int((~ml & ~rule).sum())
+        ]
+    }, index=["ML Suspicious", "ML Normal"])
+
+    st.dataframe(agreement)
+
+    # Interactive detection mode selector
+    st.subheader("Select Detection Mode")
+
+    detection_mode = st.selectbox(
+        "Detection Strategy",
+        [
+            "ML Only",
+            "Rules Only",
+            "Hybrid OR",
+            "Hybrid AND"
+        ]
+    )
+
+    mode_columns = {
+        "ML Only": "ml_alert",
+        "Rules Only": "rule_alert",
+        "Hybrid OR": "hybrid_or",
+        "Hybrid AND": "hybrid_and"
+    }
+
+    selected_col = mode_columns[detection_mode]
+
+    selected_alerts = hybrid_df[
+        hybrid_df[selected_col]
+    ].copy()
+
+    st.metric(
+        "Selected Mode Alerts",
+        len(selected_alerts)
+    )
+
+    st.subheader("Hybrid Detection Results")
+
+    display_columns = [
+        "window_start_utc",
+        "source_ip",
+        "prediction",
+        "risk_score",
+        "ml_alert",
+        "rule_alert",
+        "hybrid_or",
+        "hybrid_and"
+    ]
+
+    st.dataframe(
+        selected_alerts[display_columns],
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.download_button(
+        "Export Hybrid Detection Results",
+        data=selected_alerts.to_csv(index=False),
+        file_name="sentinelai_hybrid_results.csv",
+        mime="text/csv"
+    )
+
+    st.caption(
+        "Experimental comparison only. "
+        "Alert counts do not measure accuracy. "
+        "Ground-truth labels are required for "
+        "precision, recall and F1 evaluation."
+    )
