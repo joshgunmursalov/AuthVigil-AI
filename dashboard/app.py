@@ -505,3 +505,128 @@ if not priority_alerts.empty:
         "Rules are experimental heuristics, "
         "not confirmed incident classifications."
     )
+
+
+# SentinelAI SOC - Detection Rule Coverage Analysis
+
+st.divider()
+st.subheader("Detection Rule Coverage Analysis")
+
+if not priority_alerts.empty:
+
+    rule_df = priority_alerts.copy()
+
+    numeric_columns = [
+        "failed_logins",
+        "failure_rate",
+        "unique_usernames",
+        "rdp_logon_count",
+        "off_hours_count"
+    ]
+
+    for col in numeric_columns:
+        rule_df[col] = pd.to_numeric(
+            rule_df[col], errors="coerce"
+        ).fillna(0)
+
+    # Rule 1
+    rule_df["excessive_failures"] = (
+        (rule_df["failed_logins"] >= 10) &
+        (rule_df["failure_rate"] >= 0.70)
+    )
+
+    # Rule 2
+    rule_df["possible_spraying"] = (
+        (rule_df["unique_usernames"] >= 5) &
+        (rule_df["failed_logins"] >= 5)
+    )
+
+    # Rule 3
+    rule_df["off_hours_remote"] = (
+        (rule_df["rdp_logon_count"] >= 1) &
+        (rule_df["off_hours_count"] >= 1)
+    )
+
+    rule_columns = [
+        "excessive_failures",
+        "possible_spraying",
+        "off_hours_remote"
+    ]
+
+    rule_df["matched_rule_count"] = (
+        rule_df[rule_columns].sum(axis=1)
+    )
+
+    rule_names = {
+        "excessive_failures": "Excessive Failed Logins",
+        "possible_spraying": "Possible Password Spraying",
+        "off_hours_remote": "Off-Hours Remote Access"
+    }
+
+    rule_df["matched_rules"] = rule_df.apply(
+        lambda row: ", ".join(
+            name for col, name in rule_names.items()
+            if row[col]
+        ) or "No rule matched",
+        axis=1
+    )
+
+    total = len(rule_df)
+    covered = int(
+        (rule_df["matched_rule_count"] > 0).sum()
+    )
+    uncovered = total - covered
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric("ML Alerts", total)
+    c2.metric("Rule-Matched Alerts", covered)
+    c3.metric("No Rule Matched", uncovered)
+
+    st.metric(
+        "Rule Coverage",
+        f"{covered / total * 100:.1f}%"
+    )
+
+    st.subheader("Detection Rule Distribution")
+
+    rule_counts = (
+        rule_df[rule_columns].sum()
+        .rename(index=rule_names)
+    )
+
+    st.bar_chart(rule_counts)
+
+    st.subheader("Alert Coverage Details")
+
+    st.dataframe(
+        rule_df[
+            [
+                "window_start_utc",
+                "source_ip",
+                "risk_score",
+                "review_priority",
+                "matched_rule_count",
+                "matched_rules"
+            ]
+        ].sort_values(
+            "risk_score", ascending=False
+        ),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.download_button(
+        "Export Detection Rule Analysis",
+        data=rule_df.to_csv(index=False),
+        file_name="sentinelai_rule_coverage.csv",
+        mime="text/csv"
+    )
+
+    st.caption(
+        "Rule coverage measures agreement with "
+        "experimental heuristics, not detection accuracy."
+    )
+
+else:
+    st.info("No suspicious alerts to analyze.")
