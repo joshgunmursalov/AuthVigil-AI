@@ -883,7 +883,11 @@ if performance_path.exists():
         ] * 100
     )
 
-    st.bar_chart(chart_data)
+    st.bar_chart(
+    chart_data,
+    stack=False,
+    y_label="Performance (%)"
+)
 
     # Individual model investigation
     st.markdown("### Individual Model Evaluation")
