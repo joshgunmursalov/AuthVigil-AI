@@ -187,3 +187,67 @@ st.caption(
 )
 
 
+# SentinelAI SOC - Alert Prioritization
+
+st.divider()
+st.subheader("SOC Alert Prioritization")
+
+priority_alerts = alerts.copy()
+
+def assign_priority(score):
+    if pd.isna(score):
+        return "Unknown"
+    if score >= 0.90:
+        return "High"
+    elif score >= 0.70:
+        return "Medium"
+    return "Low"
+
+priority_alerts["review_priority"] = (
+    priority_alerts["risk_score"].apply(assign_priority)
+)
+
+priority_counts = (
+    priority_alerts["review_priority"]
+    .value_counts()
+    .reindex(
+        ["High", "Medium", "Low", "Unknown"],
+        fill_value=0
+    )
+)
+
+col1, col2, col3 = st.columns(3)
+
+col1.metric("High Priority", priority_counts["High"])
+col2.metric("Medium Priority", priority_counts["Medium"])
+col3.metric("Low Priority", priority_counts["Low"])
+
+st.subheader("Alerts by Review Priority")
+
+st.bar_chart(
+    priority_counts[["High", "Medium", "Low"]]
+)
+
+st.subheader("Prioritized SOC Alerts")
+
+st.dataframe(
+    priority_alerts.sort_values(
+        "risk_score",
+        ascending=False
+    ),
+    use_container_width=True,
+    hide_index=True
+)
+
+st.download_button(
+    label="Download Prioritized Alerts",
+    data=priority_alerts.to_csv(index=False),
+    file_name="sentinelai_prioritized_alerts.csv",
+    mime="text/csv"
+)
+
+st.caption(
+    "Review priority uses experimental score "
+    "thresholds, not verified incident severity."
+)
+
