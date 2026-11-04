@@ -329,3 +329,88 @@ else:
         "prediction. Further investigation is "
         "required before confirming an incident."
     )
+
+
+# SentinelAI SOC - Alert Triage Management
+
+if not priority_alerts.empty:
+
+    st.divider()
+    st.subheader("SOC Alert Triage")
+
+    case_key = (
+        f"{incident['source_ip']}|"
+        f"{incident['window_start_utc']}"
+    )
+
+    if "case_records" not in st.session_state:
+        st.session_state["case_records"] = {}
+
+    records = st.session_state["case_records"]
+    previous = records.get(case_key, {})
+
+    status_options = [
+        "New",
+        "Investigating",
+        "Benign",
+        "Escalated"
+    ]
+
+    status = st.selectbox(
+        "Investigation Status",
+        status_options,
+        index=status_options.index(
+            previous.get("status", "New")
+        ),
+        key=f"triage_status_{case_key}"
+    )
+
+    notes = st.text_area(
+        "Analyst Investigation Notes",
+        value=previous.get("notes", ""),
+        placeholder="Enter investigation findings...",
+        key=f"triage_notes_{case_key}"
+    )
+
+    if st.button("Save Investigation"):
+        records[case_key] = {
+            "source_ip": incident["source_ip"],
+            "timestamp": str(
+                incident["window_start_utc"]
+            ),
+            "model_score": float(
+                incident["risk_score"]
+            ),
+            "review_priority": incident[
+                "review_priority"
+            ],
+            "status": status,
+            "notes": notes
+        }
+
+        st.success("Investigation saved in this session!")
+
+    if records:
+        st.subheader("Saved Investigations")
+
+        case_df = pd.DataFrame(
+            list(records.values())
+        )
+
+        st.dataframe(
+            case_df,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.download_button(
+            "Export Investigation Report",
+            data=case_df.to_csv(index=False),
+            file_name="sentinelai_investigations.csv",
+            mime="text/csv"
+        )
+
+    st.caption(
+        "Investigation records are temporary. "
+        "Export the CSV to preserve your work."
+    )
