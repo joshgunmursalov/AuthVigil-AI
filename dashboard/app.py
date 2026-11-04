@@ -486,6 +486,90 @@ else:
     )
 
 
+# SentinelAI SOC - Investigation CSV Restore
+
+st.divider()
+st.subheader("Restore Investigation Records")
+
+if "case_records" not in st.session_state:
+    st.session_state["case_records"] = {}
+
+if "restore_message" in st.session_state:
+    st.success(st.session_state.pop("restore_message"))
+
+restore_file = st.file_uploader(
+    "Import a previously exported sentinelai_investigations.csv",
+    type=["csv"],
+    key="restore_investigations_csv"
+)
+
+if restore_file is not None and st.button("Restore Investigations"):
+    try:
+        if restore_file.size > 2_000_000:
+            raise ValueError("CSV exceeds the 2 MB import limit.")
+
+        imported = pd.read_csv(restore_file, keep_default_na=False)
+        fields = {
+            "source_ip", "timestamp", "model_score",
+            "review_priority", "status", "notes"
+        }
+
+        missing = fields - set(imported.columns)
+        if missing:
+            raise ValueError(f"Missing columns: {sorted(missing)}")
+
+        if imported.empty or len(imported) > 1000:
+            raise ValueError("CSV must contain 1 to 1000 cases.")
+
+        statuses = {"New", "Investigating", "Benign", "Escalated"}
+        recovered = {}
+
+        for row in imported.to_dict("records"):
+            ip = str(row["source_ip"]).strip()
+            time = pd.to_datetime(
+                row["timestamp"], utc=True, errors="coerce"
+            )
+            status = str(row["status"]).strip()
+            score = float(row["model_score"])
+
+            if (not ip or pd.isna(time) or
+                    status not in statuses or
+                    not 0 <= score <= 1):
+                raise ValueError("Invalid case data in imported CSV.")
+
+            stamp = str(time)
+            key = f"{ip}|{stamp}"
+
+            recovered[key] = {
+                "source_ip": ip,
+                "timestamp": stamp,
+                "model_score": score,
+                "review_priority": str(row["review_priority"]),
+                "status": status,
+                "notes": str(row["notes"])
+            }
+
+        st.session_state["case_records"].update(recovered)
+
+        for key, case in recovered.items():
+            st.session_state[f"triage_status_{key}"] = case["status"]
+            st.session_state[f"triage_notes_{key}"] = case["notes"]
+
+        st.session_state["restore_message"] = (
+            f"Restored {len(recovered)} investigation record(s)."
+        )
+
+        st.rerun()
+
+    except (ValueError, TypeError, UnicodeError,
+            pd.errors.ParserError) as error:
+        st.error(f"Import failed: {error}")
+
+st.caption(
+    "Records are stored only in your current session. "
+    "Export a fresh CSV after making changes."
+)
+
 # SentinelAI SOC - Alert Triage Management
 
 if not priority_alerts.empty:
