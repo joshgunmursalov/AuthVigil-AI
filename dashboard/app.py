@@ -251,3 +251,81 @@ st.caption(
     "thresholds, not verified incident severity."
 )
 
+
+# SentinelAI SOC - Incident Investigation Panel
+
+st.divider()
+st.subheader("SOC Incident Investigation")
+
+if priority_alerts.empty:
+    st.info("No alerts available for investigation.")
+
+else:
+    investigation_df = (
+        priority_alerts
+        .sort_values("risk_score", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    selected_id = st.selectbox(
+        "Select an alert to investigate",
+        options=list(range(len(investigation_df))),
+        format_func=lambda i: (
+            f"{investigation_df.loc[i, 'source_ip']} | "
+            f"{investigation_df.loc[i, 'window_start_utc']} | "
+            f"{investigation_df.loc[i, 'review_priority']}"
+        )
+    )
+
+    incident = investigation_df.iloc[selected_id]
+
+    st.markdown("### Selected Alert Details")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "Failed Logins",
+        int(incident["failed_logins"])
+    )
+
+    col2.metric(
+        "Model Score",
+        f"{incident['risk_score']:.4f}"
+    )
+
+    col3.metric(
+        "Review Priority",
+        incident["review_priority"]
+    )
+
+    st.markdown("### Authentication Evidence")
+
+    evidence_columns = [
+        "window_start_utc",
+        "source_ip",
+        "event_count",
+        "failed_logins",
+        "failure_rate",
+        "unique_usernames",
+        "rdp_logon_count",
+        "off_hours_count",
+        "risk_score",
+        "review_priority"
+    ]
+
+    available_columns = [
+        c for c in evidence_columns
+        if c in investigation_df.columns
+    ]
+
+    st.dataframe(
+        incident[available_columns]
+        .to_frame(name="Value"),
+        use_container_width=True
+    )
+
+    st.warning(
+        "This alert is an experimental model "
+        "prediction. Further investigation is "
+        "required before confirming an incident."
+    )
